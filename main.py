@@ -1,10 +1,10 @@
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from config import YOUR_BOT_TOKEN, YOUR_BOT_URL
 import threading
 
 # Замените 'YOUR_BOT_TOKEN' на токен вашего бота
-TOKEN = "6809369456:AAHDBT2bmN-gKEMiq1hAEjlKDgQzDPESz8U"
-bot = telebot.TeleBot(TOKEN)
+bot = telebot.TeleBot(YOUR_BOT_TOKEN)
 
 # Словарь для хранения информации о пользователях, ожидающих капчу
 user_data = {}
@@ -47,7 +47,7 @@ def handle_captcha(call):
 
         # Кнопка "Вступить в группу"
         group_button = InlineKeyboardMarkup()
-        group_button.add(InlineKeyboardButton("Вступить в группу", url="https://t.me/testdkdjndnd"))
+        group_button.add(InlineKeyboardButton("Вступить в группу", url=YOUR_BOT_URL))
 
         bot.send_message(chat_id, "Нажмите на кнопку ниже, чтобы вступить в группу.", reply_markup=group_button)
 
