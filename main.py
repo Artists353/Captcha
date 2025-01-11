@@ -3,24 +3,31 @@ import time
 from threading import Thread
 from config import YOUR_BOT_TOKEN
 
-
+# Токен вашего бота
 bot = telebot.TeleBot(YOUR_BOT_TOKEN)
 
 # Словарь для хранения пользователей, ожидающих прохождения капчи
 pending_users = {}
 
+# Имя файла для хранения списка исключённых пользователей
+KICK_FILE = "kick.txt"
+
 # Функция удаления пользователя, если он не прошёл капчу
 def kick_user_after_timeout(chat_id, user_id, message_id, timeout=20):
     time.sleep(timeout)
     if user_id in pending_users and pending_users[user_id]["chat_id"] == chat_id:
+        username = pending_users[user_id]["username"]
         try:
             # Удаляем сообщение с капчей
             bot.delete_message(chat_id, message_id)
             # Исключаем пользователя
             bot.ban_chat_member(chat_id, user_id)
             bot.unban_chat_member(chat_id, user_id)  # Разбан для возможности повторного вступления
-            # Уведомляем группу
-            bot.send_message(chat_id, f"Пользователь @{pending_users[user_id]['username']} не прошёл капчу и был удалён.")
+
+            # Записываем информацию об удалённом пользователе в файл
+            with open(KICK_FILE, "a") as f:
+                f.write(f"User ID: {user_id}, Username: @{username}\n")
+
         except Exception as e:
             print(f"Ошибка при удалении пользователя: {e}")
         finally:
@@ -77,6 +84,25 @@ def captcha_callback_handler(call):
             print(f"Ошибка при обработке капчи: {e}")
     else:
         bot.answer_callback_query(call.id, "Это сообщение не для вас!", show_alert=True)
+
+# Команда /start
+@bot.message_handler(commands=['start'])
+def start_command(message):
+    bot.send_message(message.chat.id, "Бот работает. Добро пожаловать!")
+
+# Команда /kick
+@bot.message_handler(commands=['kick'])
+def kick_command(message):
+    try:
+        # Читаем содержимое файла с исключёнными пользователями
+        with open(KICK_FILE, "r") as f:
+            data = f.read()
+        if data.strip():
+            bot.send_message(message.chat.id, f"Список пользователей, которые не прошли капчу:\n\n{data}")
+        else:
+            bot.send_message(message.chat.id, "Нет пользователей, которые не прошли капчу.")
+    except FileNotFoundError:
+        bot.send_message(message.chat.id, "Файл с пользователями не найден. Пока никто не исключён.")
 
 # Запуск бота
 if __name__ == "__main__":
