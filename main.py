@@ -1,7 +1,7 @@
 import telebot
 import time
 from threading import Thread
-from config import YOUR_BOT_TOKEN
+from config import YOUR_BOT_TOKEN, ID_CHAT_ADMIN
 
 # Токен вашего бота
 bot = telebot.TeleBot(YOUR_BOT_TOKEN)
@@ -12,7 +12,7 @@ pending_users = {}
 # Имя файла для хранения списка исключённых пользователей
 KICK_FILE = "kick.txt"
 
-# Функция удаления пользователя, если он не прошёл капчу
+# Функция для бана, удаления пользователя и уведомления администратора
 def kick_user_after_timeout(chat_id, user_id, message_id, timeout=20):
     time.sleep(timeout)
     if user_id in pending_users and pending_users[user_id]["chat_id"] == chat_id:
@@ -20,16 +20,18 @@ def kick_user_after_timeout(chat_id, user_id, message_id, timeout=20):
         try:
             # Удаляем сообщение с капчей
             bot.delete_message(chat_id, message_id)
-            # Исключаем пользователя
+            # Навсегда баним пользователя
             bot.ban_chat_member(chat_id, user_id)
-            bot.unban_chat_member(chat_id, user_id)  # Разбан для возможности повторного вступления
-
             # Записываем информацию об удалённом пользователе в файл
             with open(KICK_FILE, "a") as f:
                 f.write(f"User ID: {user_id}, Username: @{username}\n")
-
+            # Уведомляем администратора
+            bot.send_message(
+                ID_CHAT_ADMIN,
+                f"@{username} не прошёл капчу и был удалён из вашей группы."
+            )
         except Exception as e:
-            print(f"Ошибка при удалении пользователя: {e}")
+            print(f"Ошибка при бане пользователя: {e}")
         finally:
             del pending_users[user_id]
 
