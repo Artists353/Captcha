@@ -1,72 +1,84 @@
 import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from config import YOUR_BOT_TOKEN, YOUR_BOT_URL
-import threading
+import time
+from threading import Thread
+from config import YOUR_BOT_TOKEN
 
-# Замените 'YOUR_BOT_TOKEN' на токен вашего бота
+
 bot = telebot.TeleBot(YOUR_BOT_TOKEN)
 
-# Словарь для хранения информации о пользователях, ожидающих капчу
-user_data = {}
+# Словарь для хранения пользователей, ожидающих прохождения капчи
+pending_users = {}
 
-# Обработчик команды /start
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    chat_id = message.chat.id
+# Функция удаления пользователя, если он не прошёл капчу
+def kick_user_after_timeout(chat_id, user_id, message_id, timeout=20):
+    time.sleep(timeout)
+    if user_id in pending_users and pending_users[user_id]["chat_id"] == chat_id:
+        try:
+            # Удаляем сообщение с капчей
+            bot.delete_message(chat_id, message_id)
+            # Исключаем пользователя
+            bot.ban_chat_member(chat_id, user_id)
+            bot.unban_chat_member(chat_id, user_id)  # Разбан для возможности повторного вступления
+            # Уведомляем группу
+            bot.send_message(chat_id, f"Пользователь @{pending_users[user_id]['username']} не прошёл капчу и был удалён.")
+        except Exception as e:
+            print(f"Ошибка при удалении пользователя: {e}")
+        finally:
+            del pending_users[user_id]
 
-    # Кнопка "Пройти капчу"
-    captcha_button = InlineKeyboardMarkup()
-    captcha_button.add(InlineKeyboardButton("Пройти капчу", callback_data="captcha"))
+# Обработка нового участника
+@bot.message_handler(content_types=['new_chat_members'])
+def new_member_handler(message):
+    for user in message.new_chat_members:
+        chat_id = message.chat.id
+        user_id = user.id
+        username = user.username or user.first_name
 
-    # Сообщение с кнопкой
-    captcha_message = bot.send_message(
-        chat_id,
-        "Для продолжения необходимо пройти капчу. Нажмите на кнопку ниже в течение 20 секунд.",
-        reply_markup=captcha_button
-    )
+        # Отправляем сообщение с капчей
+        captcha_message = bot.send_message(
+            chat_id,
+            f"Привет, @{username}! Нажмите на кнопку ниже, чтобы подтвердить, что вы не бот.",
+            reply_markup=create_captcha_button(user_id)
+        )
 
-    # Сохранение информации о пользователе
-    user_data[chat_id] = {
-        "captcha_message_id": captcha_message.message_id,
-        "passed": False
-    }
+        # Сохраняем данные о пользователе
+        pending_users[user_id] = {
+            "chat_id": chat_id,
+            "message_id": captcha_message.message_id,
+            "username": username
+        }
 
-    # Запуск таймера на 20 секунд
-    threading.Timer(20, check_captcha_timeout, args=(chat_id,)).start()
+        # Запускаем таймер для удаления пользователя
+        Thread(target=kick_user_after_timeout, args=(chat_id, user_id, captcha_message.message_id)).start()
 
-# Проверка нажатия кнопки "Пройти капчу"
-@bot.callback_query_handler(func=lambda call: call.data == "captcha")
-def handle_captcha(call):
+# Создание кнопки капчи
+def create_captcha_button(user_id):
+    markup = telebot.types.InlineKeyboardMarkup()
+    button = telebot.types.InlineKeyboardButton("Пройти капчу", callback_data=f"captcha:{user_id}")
+    markup.add(button)
+    return markup
+
+# Обработка нажатия на кнопку капчи
+@bot.callback_query_handler(func=lambda call: call.data.startswith("captcha:"))
+def captcha_callback_handler(call):
+    user_id = int(call.data.split(":")[1])
     chat_id = call.message.chat.id
-    user = user_data.get(chat_id)
 
-    if user and not user["passed"]:
-        # Пользователь успел пройти капчу
-        bot.delete_message(chat_id, user["captcha_message_id"])
-        bot.send_message(chat_id, "Вы успешно прошли капчу!")
-
-        # Кнопка "Вступить в группу"
-        group_button = InlineKeyboardMarkup()
-        group_button.add(InlineKeyboardButton("Вступить в группу", url=YOUR_BOT_URL))
-
-        bot.send_message(chat_id, "Нажмите на кнопку ниже, чтобы вступить в группу.", reply_markup=group_button)
-
-        # Отметить, что пользователь прошёл капчу
-        user_data[chat_id]["passed"] = True
-
-# Функция проверки таймера
-def check_captcha_timeout(chat_id):
-    user = user_data.get(chat_id)
-
-    if user and not user["passed"]:
-        # Удалить сообщение с кнопкой
-        bot.delete_message(chat_id, user["captcha_message_id"])
-
-        # Сообщение о том, что время истекло
-        bot.send_message(chat_id, "Вы не успели пройти капчу. Попробуйте снова, нажав /start.")
-
-        # Удалить пользователя из данных
-        user_data.pop(chat_id, None)
+    # Проверяем, что кнопку нажал тот же пользователь
+    if call.from_user.id == user_id:
+        try:
+            # Удаляем сообщение с капчей
+            bot.delete_message(chat_id, call.message.message_id)
+            # Удаляем данные пользователя из словаря
+            del pending_users[user_id]
+            # Приветствуем пользователя
+            bot.send_message(chat_id, f"Добро пожаловать, @{call.from_user.username or call.from_user.first_name}!")
+        except Exception as e:
+            print(f"Ошибка при обработке капчи: {e}")
+    else:
+        bot.answer_callback_query(call.id, "Это сообщение не для вас!", show_alert=True)
 
 # Запуск бота
-bot.polling()
+if __name__ == "__main__":
+    print("Бот запущен...")
+    bot.polling(none_stop=True)
